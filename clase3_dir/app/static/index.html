@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liga de Fútbol - Gestión de Torneo</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- CSS personalizado -->
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="app-background"></div>
+
+    <!-- Header Principal -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="logo-badge">
+                    <i class="fa-solid fa-trophy"></i>
+                </div>
+                <div class="brand-text">
+                    <h1 id="tournament-title">Copa de Campeones 2026</h1>
+                    <span class="status-pill" id="tournament-status-badge">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i> Cargando...
+                    </span>
+                </div>
+            </div>
+
+            <!-- Panel de Control / Rol -->
+            <div class="header-actions">
+                <div class="role-indicator" id="role-indicator">
+                    <span class="role-badge viewer"><i class="fa-solid fa-eye"></i> Modo Visor</span>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-toggle-admin">
+                    <i class="fa-solid fa-lock"></i> <span id="admin-btn-text">Ingresar como Admin</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navegación por Pestañas -->
+    <nav class="tab-nav-container">
+        <div class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-standings" id="nav-standings-tab">
+                <i class="fa-solid fa-list-ol"></i> Tabla de Posiciones
+            </button>
+            <button class="tab-btn" data-tab="tab-fixture" id="nav-fixture-tab">
+                <i class="fa-solid fa-calendar-days"></i> Fixture y Resultados
+            </button>
+            <button class="tab-btn" data-tab="tab-teams" id="nav-teams-tab">
+                <i class="fa-solid fa-shield-halved"></i> Equipos
+            </button>
+            <button class="tab-btn" data-tab="tab-rules" id="nav-rules-tab">
+                <i class="fa-solid fa-circle-info"></i> Reglas de Desempate
+            </button>
+        </div>
+    </nav>
+
+    <!-- Contenido Principal -->
+    <main class="main-content">
+        <!-- Toast de Notificaciones -->
+        <div id="toast-container" class="toast-container"></div>
+
+        <!-- Pestaña 1: Tabla de Posiciones -->
+        <section id="tab-standings" class="tab-pane active">
+            <div class="section-header">
+                <div>
+                    <h2><i class="fa-solid fa-ranking-star"></i> Tabla de Posiciones</h2>
+                    <p class="section-desc">Actualizada en tiempo real con los resultados cargados fecha tras fecha.</p>
+                </div>
+                <button class="btn btn-icon" id="btn-refresh-standings" title="Actualizar tabla">
+                    <i class="fa-solid fa-rotate-right"></i>
+                </button>
+            </div>
+
+            <div class="card glass-card">
+                <div class="table-responsive">
+                    <table class="standings-table">
+                        <thead>
+                            <tr>
+                                <th class="text-center">#</th>
+                                <th>Equipo</th>
+                                <th class="text-center" title="Partidos Jugados">PJ</th>
+                                <th class="text-center" title="Partidos Ganados">PG</th>
+                                <th class="text-center" title="Partidos Empatados">PE</th>
+                                <th class="text-center" title="Partidos Perdidos">PP</th>
+                                <th class="text-center" title="Goles a Favor">GF</th>
+                                <th class="text-center" title="Goles en Contra">GC</th>
+                                <th class="text-center" title="Diferencia de Goles">DG</th>
+                                <th class="text-center highlight-col" title="Puntos Acumulados">PTS</th>
+                            </tr>
+                        </thead>
+                        <tbody id="standings-tbody">
+                            <!-- Filas inyectadas por app.js -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="standings-empty-state" class="empty-state hidden">
+                    <i class="fa-solid fa-trophy empty-icon"></i>
+                    <h3>El torneo aún no ha sido generado</h3>
+                    <p>Carga los equipos en la sección <strong>Equipos</strong> y presiona "Generar Torneo".</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Pestaña 2: Fixture y Carga de Resultados -->
+        <section id="tab-fixture" class="tab-pane">
+            <div class="section-header">
+                <div>
+                    <h2><i class="fa-solid fa-calendar-days"></i> Fixture y Resultados</h2>
+                    <p class="section-desc">Navega por las fechas del torneo y consulta o registra los marcadores.</p>
+                </div>
+            </div>
+
+            <!-- Banner de Modo Visor en Fixture -->
+            <div id="fixture-viewer-banner" class="viewer-notice-banner">
+                <i class="fa-solid fa-circle-info"></i>
+                <span>Estás en <strong>Modo Visor</strong>. Inicia sesión como <strong>Admin</strong> para ingresar o modificar los marcadores de los partidos.</span>
+            </div>
+
+            <!-- Selector de Fechas (Pagination Bar) -->
+            <div class="round-selector-card card glass-card">
+                <div class="round-navigator">
+                    <button class="btn btn-circle" id="btn-prev-round"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="round-title-box">
+                        <span class="round-label">FECHA</span>
+                        <span class="round-number" id="current-round-display">1</span>
+                        <span class="round-total" id="total-rounds-display">de 5</span>
+                    </div>
+                    <button class="btn btn-circle" id="btn-next-round"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+                <div class="round-pills-bar" id="round-pills-container">
+                    <!-- Botones rápidos de fechas 1, 2, 3... -->
+                </div>
+            </div>
+
+            <!-- Lista de Partidos de la Fecha Seleccionada -->
+            <div id="matches-container" class="matches-grid">
+                <!-- Tarjetas de partidos inyectadas por app.js -->
+            </div>
+
+            <div id="fixture-empty-state" class="empty-state hidden card glass-card">
+                <i class="fa-solid fa-calendar-xmark empty-icon"></i>
+                <h3>No hay fixture generado</h3>
+                <p>Genera el torneo en la pestaña <strong>Equipos</strong> para comenzar a cargar resultados.</p>
+            </div>
+        </section>
+
+        <!-- Pestaña 3: Equipos y Configuración del Torneo -->
+        <section id="tab-teams" class="tab-pane">
+            <div class="section-header">
+                <div>
+                    <h2><i class="fa-solid fa-shield-halved"></i> Gestión de Equipos</h2>
+                    <p class="section-desc">Agrega y administra los equipos participantes.</p>
+                </div>
+            </div>
+
+            <!-- Banner de Modo Visor en Equipos -->
+            <div id="teams-viewer-banner" class="viewer-notice-banner">
+                <i class="fa-solid fa-lock"></i>
+                <span>Estás en <strong>Modo Visor</strong>. Para registrar nuevos equipos, modificar logotipos, eliminar o iniciar el torneo, debes <a href="#" id="link-login-from-banner">Iniciar Sesión como Admin</a>.</span>
+            </div>
+
+            <!-- Sección Exclusiva de Admin: Formulario de Carga y Acciones del Torneo -->
+            <div class="grid-2col admin-only-block" id="admin-teams-controls">
+                <!-- Formulario Carga de Equipos -->
+                <div class="card glass-card">
+                    <h3 class="card-title"><i class="fa-solid fa-plus-circle"></i> Agregar Nuevo Equipo</h3>
+                    <form id="add-team-form" class="form-grid">
+                        <div class="form-group">
+                            <label for="team-name-input">Nombre del Equipo *</label>
+                            <input type="text" id="team-name-input" class="form-input" placeholder="Ej: Real Madrid, Boca Juniors, PSG" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="team-shield-file-input"><i class="fa-solid fa-upload"></i> Subir Imagen de Escudo (Archivo Local)</label>
+                            <input type="file" id="team-shield-file-input" class="form-input" accept="image/*">
+                            <span class="help-text"><i class="fa-solid fa-circle-info"></i> Tamaño máx: <strong>5 MB</strong>. Formatos: PNG, JPG, SVG, WEBP.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="team-shield-url-input">O Pegar URL de Imagen de Escudo</label>
+                            <input type="url" id="team-shield-url-input" class="form-input" placeholder="https://ejemplo.com/escudo.png">
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btn-add-team">
+                            <i class="fa-solid fa-user-plus"></i> Registrar Equipo
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Panel de Acciones del Torneo -->
+                <div class="card glass-card">
+                    <h3 class="card-title"><i class="fa-solid fa-gears"></i> Control del Torneo</h3>
+                    <p class="card-text">
+                        Una vez registrados todos los equipos, presiona <strong>Generar Torneo</strong> para armar el fixture oficial de 1 rueda (Round Robin).
+                    </p>
+                    <div class="tournament-actions-stack">
+                        <button class="btn btn-success btn-lg" id="btn-generate-tournament">
+                            <i class="fa-solid fa-play"></i> Generar Torneo (Todos contra Todos)
+                        </button>
+                        <button class="btn btn-danger-outline" id="btn-reset-tournament">
+                            <i class="fa-solid fa-trash-arrow-up"></i> Reiniciar Torneo
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lista / Grid de Equipos Registrados -->
+            <div class="card glass-card margin-top-lg">
+                <h3 class="card-title"><i class="fa-solid fa-users"></i> Equipos Registrados (<span id="team-count-badge">0</span>)</h3>
+                <div id="teams-grid" class="teams-grid">
+                    <!-- Cards de equipos inyectados por app.js -->
+                </div>
+            </div>
+        </section>
+
+        <!-- Pestaña 4: Reglas de Desempate -->
+        <section id="tab-rules" class="tab-pane">
+            <div class="section-header">
+                <div>
+                    <h2><i class="fa-solid fa-scale-balanced"></i> Reglas de Posiciones y Desempates</h2>
+                    <p class="section-desc">Criterios oficiales aplicados automáticamente en el cálculo de la tabla.</p>
+                </div>
+            </div>
+
+            <div class="rules-grid">
+                <div class="rule-card card glass-card">
+                    <div class="rule-number">1</div>
+                    <div class="rule-content">
+                        <h3>Diferencia de Goles (DG)</h3>
+                        <p>Se resta la cantidad total de goles recibidos (GC) a la cantidad total de goles convertidos (GF).</p>
+                        <span class="formula-tag">Fórmula: DG = GF - GC</span>
+                    </div>
+                </div>
+
+                <div class="rule-card card glass-card">
+                    <div class="rule-number">2</div>
+                    <div class="rule-content">
+                        <h3>Goles a Favor (GF)</h3>
+                        <p>Si la diferencia de gol es idéntica, posiciona más arriba al equipo con mayor cantidad de goles anotados.</p>
+                    </div>
+                </div>
+
+                <div class="rule-card card glass-card">
+                    <div class="rule-number">3</div>
+                    <div class="rule-content">
+                        <h3>Resultado Entre Sí (Head-to-Head)</h3>
+                        <p>Si persiste el empate, se evalúa el resultado del partido jugado entre los dos equipos empatados.</p>
+                    </div>
+                </div>
+
+                <div class="rule-card card glass-card">
+                    <div class="rule-number">4</div>
+                    <div class="rule-content">
+                        <h3>Orden Alfabético</h3>
+                        <p>Criterio final en caso de igualdad absoluta en todos los parámetros anteriores.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal de Login para Admin -->
+    <div id="admin-modal" class="modal-backdrop hidden">
+        <div class="modal-card card glass-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-user-shield"></i> Acceso Administrador</h3>
+                <button class="btn-close" id="btn-close-admin-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="admin-login-form">
+                <div class="modal-body">
+                    <p>Ingresa la contraseña para habilitar el modo de edición y administración.</p>
+                    <div class="form-group">
+                        <label for="admin-password-input">Contraseña de Admin</label>
+                        <input type="password" id="admin-password-input" class="form-input" placeholder="Introduce 'admin'" required>
+                    </div>
+                    <p class="help-text"><i class="fa-solid fa-lightbulb"></i> Nota: La contraseña por defecto es: <code>admin</code></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-admin">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-right-to-bracket"></i> Iniciar Sesión</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal para Editar Equipo (Nombre y Escudo) -->
+    <div id="edit-team-modal" class="modal-backdrop hidden">
+        <div class="modal-card card glass-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-pen-to-square"></i> Editar Equipo</h3>
+                <button class="btn-close" id="btn-close-edit-modal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="edit-team-form">
+                <input type="hidden" id="edit-team-id">
+                <div class="modal-body">
+                    <div class="team-preview-header">
+                        <div id="edit-team-shield-preview" class="team-shield-preview-circle">
+                            <i class="fa-solid fa-shield-cat"></i>
+                        </div>
+                        <span id="edit-team-title-preview" style="font-weight: 700; font-size: 1.1rem;">Nombre del Equipo</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-team-name-input">Nombre del Equipo</label>
+                        <input type="text" id="edit-team-name-input" class="form-input" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-team-file-input"><i class="fa-solid fa-upload"></i> Subir Nuevo Escudo (Archivo Local)</label>
+                        <input type="file" id="edit-team-file-input" class="form-input" accept="image/*">
+                        <span class="help-text"><i class="fa-solid fa-circle-info"></i> Tamaño máx: <strong>5 MB</strong>. Formatos: PNG, JPG, SVG, WEBP.</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-team-url-input">O Pegar URL de Imagen</label>
+                        <input type="url" id="edit-team-url-input" class="form-input" placeholder="https://ejemplo.com/escudo.png">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="btn-cancel-edit-team">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btn-save-edit-team">
+                        <i class="fa-solid fa-floppy-disk"></i> Guardar Cambios
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JS Principal -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

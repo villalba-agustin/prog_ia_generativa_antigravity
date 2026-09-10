@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Simulador de Robot Aspiradora - MCP Monitor</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e2e;
+            color: #cdd6f4;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+            color: #89b4fa;
+        }
+
+        .status-panel {
+            width: 450px;
+            margin-bottom: 15px;
+            background-color: #313244;
+            padding: 12px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .battery-bar-container {
+            width: 100%;
+            background-color: #45475a;
+            border-radius: 4px;
+            height: 14px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .battery-bar {
+            height: 100%;
+            width: 100%;
+            background-color: #a6e3a1;
+            transition: width 0.3s ease, background-color 0.3s ease;
+        }
+
+        .action-badge {
+            color: #f9e2af;
+            font-family: monospace;
+            font-weight: bold;
+        }
+
+        canvas {
+            border: 3px solid #45475a;
+            border-radius: 8px;
+            background-color: #181825;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .legend {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            font-size: 0.9em;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .color-box {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>Monitor de Entorno MCP</h1>
+    <div style="font-size: 0.9em; margin-bottom: 12px; color: #a6adc8;">Actualización en tiempo real vía HTTP Polling
+        (400ms)</div>
+
+    <div class="status-panel">
+        <div class="status-row">
+            <span>Batería: <strong id="bat-text">100%</strong></span>
+            <span>Suciedad restante: <strong id="dirt-text">0</strong></span>
+        </div>
+        <div class="battery-bar-container">
+            <div id="bat-bar" class="battery-bar"></div>
+        </div>
+        <div class="status-row" style="margin-top: 10px;">
+            <span>Última acción: <span id="act-text" class="action-badge">Esperando agente...</span></span>
+        </div>
+    </div>
+
+    <canvas id="gridCanvas" width="400" height="400"></canvas>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="color-box" style="background:#45475a;"></div>Pared
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background:#fab387;"></div>Suciedad
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background:#89b4fa; border-radius:50%;"></div>Robot
+        </div>
+        <div class="legend-item">
+            <div class="color-box" style="background:#f5c2e7;"></div>Camino recorrido
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("gridCanvas");
+        const ctx = canvas.getContext("2d");
+        const gridSize = 5;
+        const cellSize = canvas.width / gridSize;
+
+        function draw(data) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Celdas libres
+            for (let x = 0; x < gridSize; x++) {
+                for (let y = 0; y < gridSize; y++) {
+                    ctx.fillStyle = "#1e1e2e";
+                    ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                    ctx.strokeStyle = "#313244";
+                    ctx.strokeRect(x * cellSize, y * cellSize, cellSize, cellSize);
+                }
+            }
+
+            // 2. Paredes
+            ctx.fillStyle = "#45475a";
+            data.paredes.forEach(([px, py]) => {
+                ctx.fillRect(px * cellSize, py * cellSize, cellSize, cellSize);
+            });
+
+            // 3. Trayectoria histórica (línea punteada)
+            if (data.historial && data.historial.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(245, 194, 231, 0.45)";
+                ctx.lineWidth = 4;
+                ctx.setLineDash([6, 6]);
+                data.historial.forEach(([hx, hy], idx) => {
+                    const cx = hx * cellSize + cellSize / 2;
+                    const cy = hy * cellSize + cellSize / 2;
+                    if (idx === 0) ctx.moveTo(cx, cy);
+                    else ctx.lineTo(cx, cy);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 4. Suciedad
+            ctx.fillStyle = "#fab387";
+            data.suciedad.forEach(([sx, sy]) => {
+                ctx.beginPath();
+                ctx.arc(sx * cellSize + cellSize / 2, sy * cellSize + cellSize / 2, cellSize / 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // 5. Robot
+            const rx = data.pos_x * cellSize + cellSize / 2;
+            const ry = data.pos_y * cellSize + cellSize / 2;
+            ctx.beginPath();
+            ctx.arc(rx, ry, cellSize / 2.8, 0, Math.PI * 2);
+            ctx.fillStyle = "#89b4fa";
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = "#b4befe";
+            ctx.stroke();
+
+            // Marcador frontal del robot
+            ctx.beginPath();
+            ctx.arc(rx, ry, cellSize / 8, 0, Math.PI * 2);
+            ctx.fillStyle = "#11111b";
+            ctx.fill();
+
+            // 6. Actualizar panel de texto
+            document.getElementById("bat-text").innerText = `${data.bateria}%`;
+            document.getElementById("dirt-text").innerText = data.suciedad.length;
+            document.getElementById("act-text").innerText = data.ultima_accion;
+
+            const bar = document.getElementById("bat-bar");
+            bar.style.width = `${Math.max(0, data.bateria)}%`;
+            if (data.bateria < 20) bar.style.backgroundColor = "#f38ba8";
+            else if (data.bateria < 50) bar.style.backgroundColor = "#f9e2af";
+            else bar.style.backgroundColor = "#a6e3a1";
+        }
+
+        async function actualizar() {
+            try {
+                // Agregamos timestamp ?t=... para impedir la caché del navegador
+                const res = await fetch("/estado?t=" + Date.now(), { cache: "no-store" });
+                if (res.ok) {
+                    const data = await res.json();
+                    draw(data);
+                }
+            } catch (err) {
+                // Servidor cargando
+            }
+        }
+
+        // Consultar cada 300ms
+        setInterval(actualizar, 300);
+    </script>
+</body>
+
+</html>
