@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "liga-barrios": {
+      "command": "/home/avillalba/Documentos/prog_ia_generativa_antigravity/primer_parcial/mcp/.venv/bin/python",
+      "args": [
+        "/home/avillalba/Documentos/prog_ia_generativa_antigravity/primer_parcial/mcp/server.py",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/liga_barrios"
+      }
+    }
+  }
+}

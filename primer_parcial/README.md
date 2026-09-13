@@ -260,3 +260,92 @@ pytest tests/ -v
 - **Fixture Inmutable**: Una vez generado, el fixture queda bloqueado (`fixture_generated=True`)
 - **Resultados Inmutables**: El trigger `tg_enforce_match_immutability` en PostgreSQL impide cualquier modificación de marcadores ya registrados, incluso con acceso directo a la BD
 - **Motor de Posiciones Determinista**: Idempotente, se recalcula completamente desde cero en cada partido jugado
+
+---
+
+## Servidor MCP (Model Context Protocol) 🤖
+
+El proyecto incluye un servidor MCP oficial construido con el **SDK oficial de MCP para Python** (`mcp>=2.0.0`), ubicado en la carpeta independiente `mcp/`.
+
+Permite que agentes de Inteligencia Artificial (como **Antigravity IDE**) consulten información en tiempo real de la base de datos PostgreSQL de forma controlada, segura y tipada.
+
+### Principios de Seguridad
+1. **Solo Lectura**: Ninguna herramienta permite operaciones destructivas ni de escritura (`INSERT`, `UPDATE`, `DELETE`, `DROP`).
+2. **Sin Ejecución de SQL Arbitrario**: No existe ninguna herramienta genérica para ejecutar código SQL.
+3. **Consultas Parametrizadas**: Todas las consultas utilizan parámetros vinculados (`:param`) con SQLAlchemy `text()`.
+4. **Validación de Parámetros**: Tipado estricto y validaciones de rango en cada función.
+5. **Cero Exposición de Secretos**: La base de datos y esquemas excluyen credenciales, contraseñas, hashes y tablas de auditoría interna.
+
+### Catálogo de Herramientas Disponibles
+
+| # | Herramienta | Parámetros | Descripción |
+|---|---|---|---|
+| 1 | `get_database_schema` | *Ninguno* | Retorna la estructura relacional de las tablas del dominio (`tournaments`, `teams`, `players`, `rounds`, `pitches`, `matches`, `match_stats`, `standings`), sus columnas, tipos, claves primarias y foráneas. |
+| 2 | `list_teams` | `include_inactive: bool = False` | Lista los equipos registrados en el torneo activo y la cantidad de jugadores de cada uno. |
+| 3 | `list_players` | `team_id: Optional[str]`, `team_name: Optional[str]`, `only_enabled: bool = True` | Lista los jugadores registrados, su DNI, número de camiseta y equipo al que pertenecen. |
+| 4 | `get_tournament_summary` | *Ninguno* | Resumen métrico del torneo: cantidad de equipos, jugadores, fechas, partidos jugados, pendientes, suspendidos y cancelados. |
+| 5 | `get_standings` | *Ninguno* | Tabla actual de posiciones oficial con PJ, PG, PE, PP, GF, GC, DG, PTS y puntaje Fair Play. |
+| 6 | `get_matchday` | `round_number: int` | Partidos programados para la fecha indicada, con horarios, canchas asignadas, equipos y estados. |
+| 7 | `validate_fixture` | *Ninguno* | **Auditoría profunda del fixture**: detecta enfrentamientos duplicados, equipos con doble partido en una fecha, superposiciones horarias, conflictos de asignación de canchas e inconsistencias. |
+| 8 | `get_top_scorers` | `limit: int = 10` | Ranking de los máximos goleadores del torneo activo. |
+| 9 | `get_card_statistics` | `group_by: str = "team"` | Estadísticas disciplinarias de tarjetas amarillas y rojas (por equipo `'team'`, por jugador `'player'`, o `'all'`). |
+
+### Instalación y Ejecución del Servidor MCP
+
+```bash
+cd mcp
+
+# 1. Crear entorno virtual e instalar dependencias del SDK oficial MCP
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Test rápido de conexión y verificación de herramientas registradas
+python server.py --test
+
+# 3. Iniciar el servidor en modo transporte stdio (estándar para agentes IA)
+python server.py --transport stdio
+```
+
+### Ejecución de Pruebas Automatizadas del MCP
+
+```bash
+cd mcp
+source .venv/bin/activate
+pytest tests/ -v
+```
+
+La suite ejecuta 15 pruebas cubriendo cada herramienta, validaciones de errores y llamadas a través del protocolo oficial de `MCPServer`.
+
+---
+
+## Conexión con Antigravity IDE 🚀
+
+Para vincular este servidor MCP con Antigravity, se incluye la configuración lista para usar en `.agents/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "liga-barrios": {
+      "command": "/home/avillalba/Documentos/prog_ia_generativa_antigravity/primer_parcial/mcp/.venv/bin/python",
+      "args": [
+        "/home/avillalba/Documentos/prog_ia_generativa_antigravity/primer_parcial/mcp/server.py",
+        "--transport",
+        "stdio"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/liga_barrios"
+      }
+    }
+  }
+}
+```
+
+### Opciones de Ubicación del Archivo de Configuración:
+1. **Local en el Workspace (Recomendada)**:
+   `.agents/mcp_config.json` en la raíz del repositorio de trabajo.
+2. **Global de Antigravity**:
+   `~/.gemini/config/mcp_config.json` (ya configurado automáticamente).
+
+Una vez configurado, Antigravity detectará automáticamente el servidor `liga-barrios` y el agente podrá invocar cualquiera de las 9 herramientas de consulta y auditoría de la base de datos de la liga.
+
