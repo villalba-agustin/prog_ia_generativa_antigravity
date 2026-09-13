@@ -127,3 +127,34 @@ async def test_database_seeded_fixture_integrity(db_session):
             key = (m.pitch_id, m.match_date, m.start_time)
             assert key not in pitch_times, f"Solapamiento detectado en cancha {m.pitch_id} a las {m.start_time}"
             pitch_times.add(key)
+
+
+def test_schedule_pairings_to_slots_pure():
+    """Prueba unitaria aislada (sin base de datos) del algoritmo de asignación de canchas y slots."""
+    from datetime import date
+    from app.services.fixture_engine import schedule_pairings_to_slots
+
+    t1, t2, t3, t4 = [uuid.uuid4() for _ in range(4)]
+    pairings = [
+        [(t1, t2), (t3, t4)],
+        [(t1, t3), (t2, t4)],
+        [(t1, t4), (t2, t3)],
+    ]
+    start_date = date(2026, 9, 1)
+    pitch_ids = [1, 2, 3, 4]
+
+    scheduled = schedule_pairings_to_slots(
+        pairings_by_round=pairings,
+        start_date=start_date,
+        pitch_ids=pitch_ids
+    )
+
+    assert len(scheduled) == 3
+    for r_idx, r_slots in enumerate(scheduled):
+        assert len(r_slots) == 2
+        for slot in r_slots:
+            assert slot.round_number == r_idx + 1
+            assert slot.pitch_id in pitch_ids
+            assert slot.start_time is not None
+            assert slot.end_time is not None
+

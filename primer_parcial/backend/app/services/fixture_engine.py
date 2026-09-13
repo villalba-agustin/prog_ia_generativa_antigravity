@@ -1,6 +1,13 @@
+"""
+Motor de generación de fixture para Liga de Barrios y Fincas.
+Aplica el algoritmo de Berger (Round-Robin canonical a una sola rueda)
+y distribuye los partidos entre las 4 canchas oficiales y las franjas horarias reglamentarias.
+"""
+
 import uuid
-from datetime import date, time, timedelta, datetime
-from typing import List, Tuple, Dict, Optional
+from dataclasses import dataclass
+from datetime import date, time, timedelta
+from typing import List, Tuple, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -29,11 +36,23 @@ MATCH_SLOTS: List[Tuple[time, time]] = [
 ]
 
 
+@dataclass(frozen=True)
+class ScheduledMatchSlot:
+    """Estructura inmutable que representa la asignación espaciotemporal de un partido."""
+    round_number: int
+    round_date: date
+    home_team_id: uuid.UUID
+    away_team_id: uuid.UUID
+    pitch_id: int
+    start_time: time
+    end_time: time
+
+
 def generate_round_robin_pairings(team_ids: List[uuid.UUID]) -> List[List[Tuple[uuid.UUID, uuid.UUID]]]:
     """
     Algoritmo de Berger (Round-Robin canonical).
-    Genera los emparejamientos para que cada equipo juegue exactamente una vez contra cada uno.
-    Si el número de equipos es impar, se agrega un None (fecha libre / bye).
+    Genera los emparejamientos para que cada equipo enfrente una sola vez a cada rival.
+    Si el número de equipos es impar, agrega un comodín (fecha libre / bye).
     """
     teams = list(team_ids)
     n = len(teams)
@@ -58,19 +77,65 @@ def generate_round_robin_pairings(team_ids: List[uuid.UUID]) -> List[List[Tuple[
                 round_matches.append((home, away))
 
         rounds.append(round_matches)
-        # Rotar elementos excepto el primero (current_teams[0])
+        # Rotar todos los elementos excepto el primero (posición pivote)
         current_teams = [current_teams[0]] + [current_teams[-1]] + current_teams[1:-1]
 
     return rounds
 
 
+def schedule_pairings_to_slots(
+    pairings_by_round: List[List[Tuple[uuid.UUID, uuid.UUID]]],
+    start_date: date,
+    pitch_ids: List[int],
+    match_slots: List[Tuple[time, time]] = MATCH_SLOTS,
+    days_between_rounds: int = 7
+) -> List[List[ScheduledMatchSlot]]:
+    """
+    Lógica pura de programación horaria y asignación de canchas.
+    Distribuye los partidos de cada fecha de forma balanceada sobre las canchas disponibles
+    y las franjas horarias reglamentarias.
+    """
+    if not pitch_ids:
+        raise ValueError("Se requiere al menos una cancha disponible para programar partidos")
+    if not match_slots:
+        raise ValueError("Se requieren franjas horarias disponibles para programar partidos")
+
+    scheduled_rounds: List[List[ScheduledMatchSlot]] = []
+    num_pitches = len(pitch_ids)
+    num_slots = len(match_slots)
+
+    for round_idx, pairings in enumerate(pairings_by_round):
+        round_number = round_idx + 1
+        round_date = start_date + timedelta(days=round_idx * days_between_rounds)
+        round_slots: List[ScheduledMatchSlot] = []
+
+        for match_idx, (home_id, away_id) in enumerate(pairings):
+            # Rotación uniforme de cancha y horario
+            pitch_id = pitch_ids[match_idx % num_pitches]
+            slot_idx = (match_idx // num_pitches) % num_slots
+            start_t, end_t = match_slots[slot_idx]
+
+            round_slots.append(
+                ScheduledMatchSlot(
+                    round_number=round_number,
+                    round_date=round_date,
+                    home_team_id=home_id,
+                    away_team_id=away_id,
+                    pitch_id=pitch_id,
+                    start_time=start_t,
+                    end_time=end_t
+                )
+            )
+
+        scheduled_rounds.append(round_slots)
+
+    return scheduled_rounds
+
+
 class FixtureEngine:
     @staticmethod
-    async def generate_fixture_for_tournament(
-        tournament_id: uuid.UUID,
-        db: AsyncSession
-    ) -> List[Round]:
-        # 1. Obtener torneo
+    async def _validate_and_get_tournament(tournament_id: uuid.UUID, db: AsyncSession) -> Tournament:
+        """Valida que el torneo exista y no tenga fixture generado previamente."""
         tournament_query = await db.execute(
             select(Tournament).where(Tournament.id == tournament_id)
         )
@@ -86,43 +151,28 @@ class FixtureEngine:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El fixture ya fue generado para este torneo y no se puede regenerar"
             )
+        return tournament
 
-        # 2. Obtener equipos activos
-        teams_query = await db.execute(
-            select(Team).where(Team.tournament_id == tournament_id, Team.is_active == True)
-        )
-        teams = list(teams_query.scalars().all())
-        if len(teams) < 2:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Se requieren al menos 2 equipos activos para generar el fixture"
-            )
-
-        # 3. Obtener canchas (deben ser 4)
+    @staticmethod
+    async def _ensure_tournament_pitches(db: AsyncSession) -> List[Pitch]:
+        """Obtiene las canchas disponibles o inicializa las 4 canchas reglamentarias si no existen."""
         pitches_query = await db.execute(
             select(Pitch).where(Pitch.is_available == True).order_by(Pitch.pitch_number)
         )
         pitches = list(pitches_query.scalars().all())
         if not pitches:
-            # Si no hay canchas en la base de datos, crear las 4 canchas reglamentarias
             for i in range(1, 5):
-                pitch = Pitch(id=i, name=f"Cancha {i}", pitch_number=i, is_available=True)
-                db.add(pitch)
+                db.add(Pitch(id=i, name=f"Cancha {i}", pitch_number=i, is_available=True))
             await db.flush()
             pitches_query = await db.execute(
                 select(Pitch).where(Pitch.is_available == True).order_by(Pitch.pitch_number)
             )
             pitches = list(pitches_query.scalars().all())
+        return pitches
 
-        team_ids = [t.id for t in teams]
-        pairings_by_round = generate_round_robin_pairings(team_ids)
-
-        created_rounds: List[Round] = []
-        base_date = tournament.start_date
-        num_pitches = len(pitches)
-        slots_count = len(MATCH_SLOTS)
-
-        # Inicializar o asegurar entradas en la tabla de posiciones para todos los equipos
+    @staticmethod
+    async def _initialize_team_standings(tournament_id: uuid.UUID, teams: List[Team], db: AsyncSession) -> None:
+        """Asegura que todos los equipos activos tengan una fila inicial en la tabla de posiciones."""
         for team in teams:
             standing_check = await db.execute(
                 select(Standing).where(Standing.tournament_id == tournament_id, Standing.team_id == team.id)
@@ -136,37 +186,69 @@ class FixtureEngine:
                     points=0, fair_play_score=0, position=1
                 ))
 
-        # 4. Generar fechas y partidos respetando 4 canchas y slots de 70 min
-        for round_idx, pairings in enumerate(pairings_by_round):
-            round_date = base_date + timedelta(days=round_idx * 7)  # Cada fecha en fines de semana consecutivos
+    @classmethod
+    async def generate_fixture_for_tournament(
+        cls,
+        tournament_id: uuid.UUID,
+        db: AsyncSession
+    ) -> List[Round]:
+        """
+        Orquesta la generación y persistencia del fixture completo para un torneo.
+        Garantiza: todos contra todos a 1 rueda, sin duplicados ni doble partido por fecha.
+        """
+        # 1. Validar torneo
+        tournament = await cls._validate_and_get_tournament(tournament_id, db)
+
+        # 2. Validar equipos participantes
+        teams_query = await db.execute(
+            select(Team).where(Team.tournament_id == tournament_id, Team.is_active == True)
+        )
+        teams = list(teams_query.scalars().all())
+        if len(teams) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Se requieren al menos 2 equipos activos para generar el fixture"
+            )
+
+        # 3. Obtener canchas e inicializar tabla de posiciones
+        pitches = await cls._ensure_tournament_pitches(db)
+        await cls._initialize_team_standings(tournament_id, teams, db)
+
+        # 4. Cálculo algorítmico puro (aislado y testeable)
+        team_ids = [t.id for t in teams]
+        pairings_by_round = generate_round_robin_pairings(team_ids)
+        pitch_ids = [p.id for p in pitches]
+        scheduled_rounds = schedule_pairings_to_slots(
+            pairings_by_round=pairings_by_round,
+            start_date=tournament.start_date,
+            pitch_ids=pitch_ids,
+            match_slots=MATCH_SLOTS
+        )
+
+        # 5. Persistencia en base de datos
+        created_rounds: List[Round] = []
+        for round_slots in scheduled_rounds:
+            first_slot = round_slots[0]
             round_obj = Round(
                 tournament_id=tournament_id,
-                round_number=round_idx + 1,
-                name=f"Fecha {round_idx + 1}",
-                scheduled_date=round_date,
+                round_number=first_slot.round_number,
+                name=f"Fecha {first_slot.round_number}",
+                scheduled_date=first_slot.round_date,
                 status="PENDIENTE"
             )
             db.add(round_obj)
-            await db.flush()  # Obtener ID de la ronda
+            await db.flush()  # Generar ID de la ronda para las FKs de los partidos
 
-            # Asignar canchas y slots a cada partido de la fecha
-            # Usamos una rotación para equilibrar canchas y horarios
-            for match_idx, (home_id, away_id) in enumerate(pairings):
-                pitch_index = match_idx % num_pitches
-                slot_index = (match_idx // num_pitches) % slots_count
-                
-                pitch = pitches[pitch_index]
-                start_t, end_t = MATCH_SLOTS[slot_index]
-
+            for slot in round_slots:
                 match_obj = Match(
                     round_id=round_obj.id,
                     tournament_id=tournament_id,
-                    home_team_id=home_id,
-                    away_team_id=away_id,
-                    pitch_id=pitch.id,
-                    match_date=round_date,
-                    start_time=start_t,
-                    end_time=end_t,
+                    home_team_id=slot.home_team_id,
+                    away_team_id=slot.away_team_id,
+                    pitch_id=slot.pitch_id,
+                    match_date=slot.round_date,
+                    start_time=slot.start_time,
+                    end_time=slot.end_time,
                     status="PENDIENTE",
                     is_locked=False
                 )

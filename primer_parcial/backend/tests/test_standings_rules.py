@@ -105,3 +105,50 @@ async def test_tiebreaker_hierarchy(db_session):
     # Limpieza
     await db_session.delete(test_tourn)
     await db_session.commit()
+
+
+def test_compute_standings_ranking_pure():
+    """Prueba unitaria pura y aislada de los criterios de clasificación sin base de datos."""
+    from app.services.standings_engine import compute_standings_ranking, CompletedMatchResult
+
+    t_alpha = uuid.uuid4()
+    t_beta = uuid.uuid4()
+    t_gamma = uuid.uuid4()
+
+    # Partidos:
+    # Alpha 3 - 0 Beta -> Alpha 3 pts, Beta 0 pts
+    # Beta 2 - 1 Gamma -> Beta 3 pts, Gamma 0 pts
+    # Gamma 2 - 0 Alpha -> Gamma 3 pts, Alpha 0 pts
+    # Triple empate en 3 puntos:
+    # Alpha: GF 3, GC 2, DG +1, PTS 3
+    # Beta: GF 2, GC 4, DG -2, PTS 3
+    # Gamma: GF 3, GC 2, DG +1, PTS 3
+    # Alpha y Gamma empatan en PTS (3), DG (+1) y GF (3)!
+    # Head-to-Head entre Alpha y Gamma: Gamma le ganó 2-0 a Alpha -> Gamma debe quedar arriba de Alpha!
+    matches = [
+        CompletedMatchResult(home_team_id=t_alpha, away_team_id=t_beta, home_score=3, away_score=0),
+        CompletedMatchResult(home_team_id=t_beta, away_team_id=t_gamma, home_score=2, away_score=1),
+        CompletedMatchResult(home_team_id=t_gamma, away_team_id=t_alpha, home_score=2, away_score=0),
+    ]
+
+    ranking = compute_standings_ranking(
+        team_ids=[t_alpha, t_beta, t_gamma],
+        played_matches=matches
+    )
+
+    assert len(ranking) == 3
+    # 1ro debe ser Gamma por Head-to-Head contra Alpha (DG +1 ambos, pero Gamma ganó 2-0 directo)
+    assert ranking[0].team_id == t_gamma
+    assert ranking[0].points == 3
+    assert ranking[0].goal_diff == 1
+
+    # 2do debe ser Alpha
+    assert ranking[1].team_id == t_alpha
+    assert ranking[1].points == 3
+    assert ranking[1].goal_diff == 1
+
+    # 3ro debe ser Beta (DG -2)
+    assert ranking[2].team_id == t_beta
+    assert ranking[2].points == 3
+    assert ranking[2].goal_diff == -2
+
